@@ -1,0 +1,28 @@
+# consensus 配置样例 — 拷贝到 ~/.config/consensus/config.yaml（全局）或项目 .consensus.yaml（仓库级覆盖）
+# 全部字段可省略：二进制默认 PATH 探测，模型默认随各宿主
+roster:
+  - key: oc-spawn              # 席位1：opencode run 子进程（CLI 通道）
+    tool: opencode
+    channel: cli
+    model: null                # null = 随 opencode 默认模型
+    # bin: /usr/local/bin/opencode   # 手动指定二进制（默认：env CONSENSUS_BIN_OPENCODE > 此处 > PATH）
+  - key: dsh                   # 席位2：dsh ACP 宿主
+    tool: dsh
+    channel: acp
+    model: null                # 标注用；实际模型随 dsh profile
+    # bin: "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+    # env 由代码固定组装（DSH_PERMISSION_MODE=read-only + 凭据运行时读取），不接受配置注入
+  - key: omp                   # 席位3：omp ACP 宿主
+    tool: omp
+    channel: acp
+    model: null                # null = 随 omp 默认
+    # args: ["--approval-mode", "always-ask"]   # 启动参数（omp 无协议层权限时建议）
+debate:
+  maxRounds: 3                 # 交叉批评轮数上限（含 R1）
+  blindReportMaxWords: 600
+  confidenceThreshold: 70      # 任一席置信度低于此触发 R2
+voting:
+  rootCauseRule: non-objection # 根因 = 全员非反对
+  fixRule: no-objection        # 修复 = 无反对，多候选并列
+timeoutPerCallMs: 600000       # 单次调用超时
+budgetBumpFactor: 1.5          # budget-starved 重试的预算放宽倍数

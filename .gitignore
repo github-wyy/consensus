@@ -1,0 +1,9 @@
+# consensus 运行产物（checkpoint/报告/审计流/预检缓存）
+.consensus/
+
+# Node
+node_modules/
+*.log
+
+# macOS
+.DS_Store
