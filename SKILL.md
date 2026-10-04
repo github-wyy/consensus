@@ -27,17 +27,18 @@ description: 共识模式——多 agent 辩论强共识诊断。当用户要对
 4. **增量上下文**：R2+ 只发新增材料（他方结论+分歧点），不重贴全文
 5. **分层判定**：根因=全员非反对；修复方案=无反对票，允许多候选并列
 6. **僵局降级**：轮数耗尽仍有实质分歧 → 输出已共识部分+分歧报告（按层标注），交用户裁决，**不强制收敛**
-7. **成本披露**：报告含调用次数/token/耗时 + 单 agent 对照基线估算
+7. **成本披露**：报告含调用次数/token/耗时 + 单 agent 对照基线估算（数据源：state.json checkpoint 的 cost 累积）
+8. **席位预检、永不静默降级**：辩论前 `preflight`；席位运行中失败走三分类诊断（launch/budget/structural），通道回落必披露（channelFallback）；**任何收窄调查员独立审查范围的有损动作须用户批准**——重试只做无损动作
 
-## 阵容（默认，可被 .consensus.yaml 覆盖）
+## 阵容（默认，可被 .consensus.yaml / ~/.config/consensus/config.yaml 覆盖）
 
 | 槽位 | 宿主 | 模型 |
 |---|---|---|
-| 1 | opencode spawn 子进程（`opencode run`） | tkehub/tke/deepseek-flash-latest（避开协调者同模型 glm） |
-| 2 | dsh acp profile | tke/deepseek-pro-latest（已钉，见 #125） |
-| 3 | omp acp | tke/deepseek-pro-latest（omp 默认） |
+| 1 | opencode spawn 子进程（`opencode run`） | null=随 opencode 默认（配置可钉死） |
+| 2 | dsh acp profile | 随 dsh profile（配置标注用） |
+| 3 | omp acp | null=随 omp 默认 |
 
-槽位 3 与槽位 2 同模型（deepseek-pro），异构性打折——首跑（#124）后评估是否调整（如 flash 或接入第四家）。
+席位二进制经三级解析：`CONSENSUS_BIN_{OPENCODE,DSH,OMP}` env > 配置 `roster[].bin` > PATH 探测（`lib/preflight.mjs`）。异构性纪律：三席刻意选不同模型，避免同模型趋同——设计依据见 README「协议设计依据」。
 
 ## 追问分级
 
@@ -47,7 +48,8 @@ description: 共识模式——多 agent 辩论强共识诊断。当用户要对
 ## 工具与文件
 
 - 通道客户端：`lib/acp-client.mjs`（ACP 协议）+ `lib/cli-client.mjs`（CLI 回落通道）
-- 调查员定义：`lib/investigators.mjs`（启动命令、env、权限策略、适配差异）
-- 配置：`~/.config/consensus/config.yaml` 全局默认 + 仓库 `.consensus.yaml` 覆盖
-- 落盘：`.consensus/runs/<timestamp>/`（report.json + report.html + events.ndjson）
+- 调查员定义：`lib/investigators.mjs`（阵容组装、配置解析、凭据读取）
+- 工程纪律：`lib/preflight.mjs`（席位预检/二进制三级解析）+ `lib/diagnose.mjs`（失败三分类）+ `lib/checkpoint.mjs`（逐轮 checkpoint）
+- 配置：`~/.config/consensus/config.yaml` 全局默认 + 仓库 `.consensus.yaml` 覆盖（样例见 `config.example.yaml`）
+- 落盘：`.consensus/runs/<timestamp>/`（state.json=checkpoint 与阵容快照 + reports/ + report.json + report.html + events.ndjson）
 - 完整协议细节：`SKILL_BODY.md`

@@ -8,14 +8,13 @@
 
 | 槽位 | 宿主与启动 | 模型 | 通道 |
 |---|---|---|---|
-| `oc-spawn` | `opencode run --model <m> -` (stdin 传任务书) | 配置指定（默认 tkehub/tke/deepseek-flash-latest） | CLI（子进程） |
-| `dsh` | `dsh --profile acp`（runtime CLI 路径见下） | tke/deepseek-pro-latest（profile 已钉） | ACP |
-| `omp` | `omp acp` | 配置指定（默认随 omp：tkehub tke/deepseek-pro-latest） | ACP |
+| `oc-spawn` | `opencode run`（stdin 传任务书；model 省略随 opencode 默认） | null=随宿主（配置可钉死） | CLI（子进程） |
+| `dsh` | `dsh --profile acp`（bin 三级解析，见「席位路由预检」） | 随 dsh profile（配置标注用） | ACP |
+| `omp` | `omp acp`（`roster[].args` 可附启动参数） | null=随宿主 | ACP |
 
-- dsh runtime CLI：`/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`
-- dsh 必须带 env：`DSH_PERMISSION_MODE=read-only`（沙箱级只读）、`TOKENHUB_API_KEY`（凭据经环境注入，编排层从 opencode auth.json 读取 tkehub key）
-- omp 建议带 `--approval-mode always-ask`（write/edit 无协议权限请求，需进程级硬拒；bash 逐条经权限请求放行）
-- **部分参与降级**：某席不可用（进程起不来/握手失败）→ 该席缺席，双共识过渡，报告如实标注
+- dsh 席 env 由代码固定组装：`DSH_PERMISSION_MODE=read-only`（沙箱级只读）+ `TOKENHUB_API_KEY`（运行时从 opencode auth.json 读取，无则跳过）；**不接受配置注入 env**（防任意环境变量进入子进程）
+- omp 无协议层权限时可经 `roster[].args` 带 `--approval-mode always-ask`（write/edit 需进程级硬拒；bash 逐条经权限请求放行）
+- **部分参与降级**：某席不可用（预检失败/重试耗尽）→ 该席缺席，双共识过渡，报告如实标注
 
 ### 权限策略（决策 13：只读 + 可执行命令）
 
@@ -27,6 +26,17 @@ ACP `session/request_permission` 统一策略：
 4. read 类（工具自带 read/grep/glob）→ allow（once）
 5. 权限请求不应答超时（10s）→ 自动 reject（opencode 行为未实测，防御性设计）
 6. CLI 通道（oc-spawn）：无协议权限层，任务书内嵌只读纪律 + 子进程 cwd 隔离
+
+### 席位路由预检（决策 14：学自 agent-arena）
+
+进辩论前确认每个席位真实可用，**永不静默降级**：
+
+- 二进制三级解析（`lib/preflight.mjs`）：env `CONSENSUS_BIN_{OPENCODE,DSH,OMP}` > 配置 `roster[].bin` > PATH `which` 探测；均未命中 → 该席预检失败（错误信息含可操作提示）
+- 最小无害探测：ACP 席 = 完整 `initialize`+`session/new`+`dispose` 握手（零 token）；CLI 席 = `<bin> --version`（零 token），`--deep` 时追加一次最小 prompt（验证 auth+模型）
+- 缓存 `.consensus/preflight.json`：ok 且二进制仍在 → 命中跳过；否则重探；`--force` 强制
+- 预检失败席位：从本轮阵容剔除（部分参与降级）；全部失败 → 中止并列出各席诊断
+- 预检通过的路由运行中失败 → 三分类诊断（§5）；通道回落必披露（checkpoint `channelFallback`）
+- 铁律：**saved route 失败不静默换路由**——要么明确报错并提示切换，要么披露降级
 
 ### 会话管理（run 契约三定律）
 
@@ -45,6 +55,7 @@ ACP `session/request_permission` 统一策略：
 
 ### 阶段 1：盲辩（并行）
 
+- （前置）`run.mjs blind` 自动席位预检（缓存感知）；预检失败席位缺席，如实标注
 - 三席**同时**发起（ACP 两席 + CLI 一席并行）
 - 任务书：问题原文 + 工作区路径 + 报告 schema 要求 + 只读纪律（CLI 席）
 - **零他方信息**：任务书不得含任何其他调查员的存在痕迹或结论
@@ -65,6 +76,7 @@ ACP `session/request_permission` 统一策略：
 - 发送：其他两席结论摘要 + 具体分歧点（**只发新增材料**）
 - 要求回应：认同则说明被哪条证据说服；不认同则给反驳证据（file:line）
 - 协调者同时用 read/grep 对分歧点亲自实证（不辩论，只实证）
+- 轮末把未收敛分歧写入 checkpoint（决策 15：逐轮 checkpoint，学自 agent-arena）：`round --divergences-file <f>`（分歧点一行一个；整体替换 openDisagreements）
 - 轮末检查：收敛则进表决；未收敛且预算未尽则续轮
 - 僵局（预算耗尽仍实质分歧）：降级输出（见 §5）
 
@@ -86,13 +98,14 @@ ACP `session/request_permission` 统一策略：
 
 ```
 .consensus/runs/<timestamp>/
-├── report.json      # 结构化共识记录（schema = 原型 mock 数据结构 D）
-├── report.html      # Review 面三视图渲染
-├── events.ndjson    # 全部调查员调用原始事件流（审计）
-└── config.json      # 本次运行的阵容快照
+├── state.json      # checkpoint：rounds[] 累积（每席 attempts/diagnosis/channelFallback）、openDisagreements、cost 累积、阵容快照（不含凭据）
+├── reports/        # <seat>-<phase>.md 各席各轮报告（含失败诊断与重试轨迹）
+├── report.json     # 结构化共识记录（schema = 原型 mock 数据结构 D；协调者编译）
+├── report.html     # Review 面三视图渲染
+└── events.ndjson   # 全部调查员调用原始事件流（审计）
 ```
 
-- 成本披露：调用次数 × 席位、token 汇总（ACP usage_update / CLI message_end）、墙钟耗时、单 agent 对照基线估算
+- 成本披露：调用次数 × 席位、token 汇总（ACP usage_update / CLI 事件流；oc-spawn 无 usage 时如实缺失）、墙钟耗时、单 agent 对照基线估算——数据源为 state.json 的 cost 累积（calls = Σ attempts）
 
 ### 追问（分级，决策 12）
 
@@ -105,16 +118,19 @@ ACP `session/request_permission` 统一策略：
 ```sh
 LIB=~/.agents/skills/consensus/lib
 
-# 阶段1 盲辩（问题原文+报告要求写入 question 文件；由协调者构造）
+# 前置：席位预检（零 token；--deep 对 CLI 席加最小 prompt 验证 auth；--force 忽略缓存）
+node $LIB/run.mjs preflight --workspace <repo> [--deep] [--force]
+
+# 阶段1 盲辩（问题原文+报告要求写入 question 文件；由协调者构造；自动预检）
 node $LIB/run.mjs blind --workspace <repo> --question-file <q.txt>
-# → stdout: {run, reports[{seat,file}], summary}；报告在 <repo>/.consensus/runs/<ts>/reports/<seat>-R1-blind.md
+# → stdout: {run, reports[{seat,file}], summary, preflight, activeSeats, cost}；报告在 <repo>/.consensus/runs/<ts>/reports/<seat>-R1-blind.md
 
 # 阶段2（协调者本地，零调用）：读三份报告 → 观点矩阵 + 分歧检测 → 条件触发判定
 #   全一致且置信度≥70%且证据齐 → 直跳表决；否则进 R2
 
 # 阶段3 亮牌（每席 prompt 文件须含：该席自己上轮报告 + 他方结论 + 分歧点，见 §2 R2+ 模板）
-node $LIB/run.mjs round --run <ts> --prompt-file <r2.txt> --workspace <repo> [--phase R2]
-# 协调者同时用 read/grep 亲自实证分歧点
+node $LIB/run.mjs round --run <ts> --prompt-file <r2.txt> --workspace <repo> [--phase R2] [--divergences-file <div.txt>]
+# 协调者同时用 read/grep 亲自实证分歧点；轮末未收敛分歧经 --divergences-file 写入 checkpoint（一行一个，整体替换 openDisagreements）
 
 # 阶段4 表决（draft-file = 共识文案草案，模板见 §2）
 node $LIB/run.mjs vote --run <ts> --draft-file <draft.txt> --workspace <repo>
@@ -127,6 +143,8 @@ node $LIB/render-report.mjs <repo>/.consensus/runs/<ts>/report.json
 # 查询 / 排查
 node $LIB/run.mjs status --workspace <repo> [--run <ts>]
 ```
+
+round/vote 重建阵容：bin 取自 checkpoint 快照（失效则重新三级解析），env/凭据现场组装；仅 checkpoint `activeSeats` 内的席位参与。
 
 追问（分级）：默认协调者直接读 report.json + reports/ 作答；新信息/挑战共识 →
 构造增量 prompt（含该席全部既往报告）走 `round`（--phase Q1、Q2…）→ 重新表决受影响层 → 更新 report.json。
@@ -213,18 +231,19 @@ roster:
   - key: oc-spawn
     tool: opencode
     channel: cli          # opencode run 子进程
-    model: tkehub/tke/deepseek-flash-latest
+    model: null           # null = 随 opencode 默认
+    # bin: /usr/local/bin/opencode   # 三级解析之外的手动指定（默认：env CONSENSUS_BIN_OPENCODE > 此处 > PATH）
   - key: dsh
     tool: dsh
     channel: acp
-    model: tke/deepseek-pro-latest   # profile 已钉，此处快照用
-    env:
-      DSH_PERMISSION_MODE: read-only
+    model: null           # 标注用；实际模型随 dsh profile
+    # bin: "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
+    # env 由代码固定组装（DSH_PERMISSION_MODE=read-only + 凭据运行时读取），不接受配置注入
   - key: omp
     tool: omp
     channel: acp
-    model: null            # null = 随 omp 默认
-    args: ["--approval-mode", "always-ask"]
+    model: null           # null = 随 omp 默认
+    # args: ["--approval-mode", "always-ask"]   # 启动参数（omp 无协议层权限时建议）
 moderator:
   role: coordinator        # 主会话兼任（#122 定案）
 debate:
@@ -235,20 +254,32 @@ voting:
   rootCauseRule: non-objection
   fixRule: no-objection
 timeoutPerCallMs: 600000   # 10 分钟
+budgetBumpFactor: 1.5      # budget-starved 重试的预算放宽倍数
 idleRecycleMs: 1800000     # 30 分钟
 ```
 
 ## 5. 降级路径
 
+失败先经三分类诊断（`lib/diagnose.mjs`，决策 16；学自 agent-arena 的 error 分类纪律），分类驱动重试（每席每轮 attempts ≤ 2）：
+
+| 分类 | 触发 | 重试策略 |
+|---|---|---|
+| launch-failure | ACP 握手失败 / CLI exit≠0 / ENOENT | ACP 席回落 CLI 通道重试 1 次（**披露 channelFallback**）；CLI 席同通道重试 1 次 |
+| budget-starved | prompt 超时 / max_tokens | 同通道放宽预算（×`budgetBumpFactor`，默认 1.5）重试 1 次 |
+| structural | refusal / 输出为空 / 其他协议错误 | 不重试 → 缺席，如实标注 |
+
+铁律（学自 agent-arena）：**重试只做无损动作**（重开进程 / 放宽预算 / 换通道并披露）；任何收窄调查员独立审查范围的有损动作（砍工具 / 砍轮数 / 降上下文）**须用户批准**。
+
 | 情形 | 处理 |
 |---|---|
 | 僵局（轮数耗尽） | 输出已共识部分 + 分歧报告（按层标注），交用户裁决，不强制收敛 |
-| 某席缺席 | 双共识过渡，报告标注席位状态 |
-| ACP 握手失败 | 该席回落 CLI 通道（dsh headless / omp -p）；再失败则缺席 |
+| 某席缺席 | 双共识过渡，报告标注席位状态（预检失败或重试耗尽，checkpoint 留诊断） |
+| ACP 握手失败 | 三分类 launch-failure → 回落 CLI 通道（dsh headless / omp -p，披露 channelFallback）→ 再失败则缺席 |
 | 权限请求超时 | 自动 reject，继续 |
-| 调查员进程崩溃 | settle {stopReason:error} → 重试 1 次 → 缺席 |
+| 调查员进程崩溃 | settle {stopReason:error} → 三分类诊断驱动重试（≤2 attempts）→ 缺席 |
 
 ## 6. 与单 agent 对照基线（成本披露用）
 
 估算公式：单次等价诊断 ≈ R1 任务书 tokens（三席共享同一任务书文本）× 1 席。
 报告 `cost.compare` 字段格式：`单 agent 对照基线：1 次调用 / ~XK tokens / ~Y 秒（无分歧报告与交叉验证）`，X/Y 取三席 R1 均值。
+成本数据取自 state.json 的 cost 累积（calls = Σ attempts；tokens 为 usage 汇总，oc-spawn 无 usage 时如实缺失）。
