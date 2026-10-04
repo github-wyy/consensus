@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>共识报告 · {{QUESTION}}</title>
+<!--
+  consensus skill 报告渲染模板（#121 原型转正，#123 骨架）
+  渲染：lib/render-report.mjs 注入 report.json 替换 __REPORT__
+  三视图：A 结论优先卡片 / B 叙事公文判决书 / C 观点矩阵（底部条 + ←/→ 切换）
+-->
+<style>
+  :root {
+    --ink: #1a1d23; --ink-2: #4a5060; --ink-3: #8a90a0;
+    --line: #e3e6ec; --bg: #fbfbfd; --card: #ffffff;
+    --accent: #2f5fd7; --accent-soft: #eef2fc;
+    --ok: #1a7f4b; --ok-soft: #e9f6ef;
+    --warn: #9a6b00; --warn-soft: #fdf3dd;
+    --bad: #b3392e; --bad-soft: #fdeeec;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font: 15px/1.75 -apple-system, "PingFang SC", "Noto Sans SC", sans-serif;
+    color: var(--ink); background: var(--bg); padding-bottom: 88px; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 40px 28px 24px; }
+  h1 { font-size: 21px; line-height: 1.4; margin-bottom: 4px; }
+  .meta { color: var(--ink-3); font-size: 12.5px; margin-bottom: 26px; font-family: var(--mono); }
+  code, .file { font-family: var(--mono); font-size: 12.5px; background: var(--accent-soft);
+    color: var(--accent); padding: 1px 5px; border-radius: 3px; word-break: break-all; }
+  .badge { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 2px 10px;
+    border-radius: 999px; vertical-align: 2px; white-space: nowrap; }
+  .b-strong  { background: var(--ok-soft); color: var(--ok); }
+  .b-reserve { background: var(--warn-soft); color: var(--warn); }
+  .b-major   { background: var(--accent-soft); color: var(--accent); }
+  .b-stuck   { background: var(--bad-soft); color: var(--bad); }
+  blockquote { border-left: 3px solid var(--line); padding: 6px 14px; margin: 8px 0;
+    color: var(--ink-2); font-size: 13.5px; background: #fff; }
+  blockquote .q-who { font-size: 11px; color: var(--ink-3); font-family: var(--mono); display: block; }
+  #switcher { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 2px; z-index: 99;
+    background: #1a1d23; color: #fff; border-radius: 999px; padding: 6px 10px;
+    box-shadow: 0 8px 28px rgba(20,24,34,.38); user-select: none; }
+  #switcher button { background: none; border: 0; color: #cdd3e0; font-size: 17px; cursor: pointer;
+    padding: 4px 12px; border-radius: 999px; line-height: 1; }
+  #switcher button:hover { background: #2c3242; color: #fff; }
+  #switcher .label { font-size: 12.5px; padding: 0 10px; min-width: 220px; text-align: center; }
+  #switcher .label b { font-weight: 600; }
+  #switcher .label small { color: #8a90a0; font-size: 11px; margin-left: 6px; }
+  /* A */
+  .va .verdict-card { background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 22px 26px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(20,24,34,.04); }
+  .va .layer-tag { font: 11px/1 var(--mono); color: var(--ink-3); letter-spacing: 2px; }
+  .va .root-text { font-size: 17.5px; font-weight: 600; line-height: 1.6; margin: 6px 0 4px; }
+  .va .votes { font-size: 12px; color: var(--ink-3); font-family: var(--mono); }
+  .va .fix-row { display: flex; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  .va .fix-card { flex: 1 1 240px; background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px 18px; }
+  .va .fix-card h3 { font-size: 14.5px; margin-bottom: 6px; }
+  .va details { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 12px 20px; margin-bottom: 10px; }
+  .va summary { cursor: pointer; font-weight: 600; font-size: 14px; list-style: none; }
+  .va summary::before { content: "▸ "; color: var(--ink-3); }
+  .va details[open] summary::before { content: "▾ "; }
+  .va details .inner { padding-top: 10px; border-top: 1px dashed var(--line); margin-top: 10px; }
+  /* B */
+  .vb { max-width: 720px; }
+  .vb .doc { background: var(--card); border: 1px solid var(--line); border-radius: 4px;
+    padding: 48px 52px; box-shadow: 0 1px 4px rgba(20,24,34,.05); font-size: 15px; line-height: 2.05; counter-reset: sec; }
+  .vb .doc h2 { font-size: 17px; margin: 26px 0 10px; padding-top: 18px; border-top: 1px solid var(--line); counter-increment: sec; }
+  .vb .doc h2::before { content: counter(sec) "　"; color: var(--accent); font-family: var(--mono); }
+  .vb .doc h2:first-of-type { border-top: 0; padding-top: 0; }
+  .vb .doc .ruling { background: var(--accent-soft); border-radius: 6px; padding: 10px 18px; font-weight: 500; }
+  .vb ol { padding-left: 22px; } .vb li { margin-bottom: 6px; }
+  .vb .timeline { list-style: none; padding-left: 0; }
+  .vb .timeline li { padding-left: 76px; position: relative; }
+  .vb .timeline .t { position: absolute; left: 0; top: 0; font: 11.5px var(--mono); color: var(--ink-3); }
+  /* C */
+  .vc { font-size: 13.5px; }
+  .vc table { width: 100%; border-collapse: collapse; background: var(--card);
+    border: 1px solid var(--line); margin-bottom: 18px; }
+  .vc th, .vc td { border: 1px solid var(--line); padding: 9px 12px; vertical-align: top; text-align: left; }
+  .vc thead th { background: #f4f6fa; font-size: 12px; font-family: var(--mono); color: var(--ink-2); }
+  .vc td.who { font-family: var(--mono); font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+  .vc .cell-sub { color: var(--ink-3); font-size: 12px; font-family: var(--mono); }
+  .vc .agree { color: var(--ok); font-weight: 600; } .vc .obj { color: var(--bad); font-weight: 600; }
+  .vc .res { color: var(--warn); font-weight: 600; }
+  .vc h3 { font: 600 12px var(--mono); color: var(--ink-2); letter-spacing: 1.5px; margin: 24px 0 8px; }
+  .vc .dense li { margin-bottom: 4px; font-size: 13px; }
+  .vc ul, .vc ol { padding-left: 20px; }
+  .esc { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<div id="switcher">
+  <button id="prev" title="上一个视图（←）">←</button>
+  <div class="label" id="swlabel"></div>
+  <button id="next" title="下一个视图（→）">→</button>
+</div>
+<script>
+const D = __REPORT__;
+D.who = id => (D.investigators || []).find(i => i.id === id) || { id };
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const badge = (s) => {
+  const cls = { "强共识":"b-strong", "共识+保留意见":"b-reserve", "多数共识 2:1":"b-major", "未收敛":"b-stuck" }[s] || "b-stuck";
+  return `<span class="badge ${cls}">${esc(s)}</span>`;
+};
+const meta = () => `<p class="meta">${esc(D.date)} · ${esc(D.workspace)} · ${esc(D.rounds)} · ${(D.investigators||[]).map(i=>esc(i.id)).join(' / ')}</p>`;
+
+function renderA() {
+  const f = (D.fixes||[]).map(x => `
+    <div class="fix-card">
+      <h3>${esc(x.title)} ${badge(x.status)}</h3>
+      <p style="font-size:13px;color:var(--ink-2)">${esc(x.desc)}</p>
+      ${x.note ? `<p style="font-size:12px;color:var(--bad);margin-top:6px">${esc(x.note)}</p>` : ""}
+      <p class="votes" style="margin-top:8px">${esc(x.votes)}</p>
+    </div>`).join("");
+  const div = (D.divergences||[]).map(x => `
+    <li><b>${esc(x.a)}</b> 认为是 ${esc(x.aView)}，<b>${esc(x.b)}</b> 认为是 ${esc(x.bView)}，分歧在于${esc(x.point)}。
+    <br><span style="font-size:12.5px;color:var(--ink-3)">（${esc(x.round)}）${esc(x.resolved)}</span></li>`).join("");
+  const res = (D.reservations||[]).map(x => `
+    <li><blockquote><span class="q-who">${esc(x.who)} 原话（逐字引用）</span>“${esc(x.quote)}”</blockquote>
+    <span style="font-size:12.5px;color:var(--ink-3)">${esc(x.evidence)}</span></li>`).join("");
+  const traj = (D.trajectory||[]).map(t => `<li><b>${esc(t.round)}</b>（${esc(t.turns)}）— ${esc(t.key)}</li>`).join("");
+  const ev = (D.evidenceIndex||[]).map(e => `<li><span class="file">${esc(e.loc)}</span> ${esc(e.desc)} ${e.verified ? "✓" : "未复核"}</li>`).join("");
+  return `
+  <div class="va">
+    <h1>${esc(D.question)}</h1>${meta()}
+    <div class="verdict-card">
+      <div class="layer-tag">根因共识</div>
+      <div class="root-text">${esc(D.rootCause.text)} ${badge(D.rootCause.status)}</div>
+      <p class="votes">${esc(D.rootCause.votes)} · 证据：${(D.rootCause.evidence||[]).map(e=>`<span class="file">${esc(e)}</span>`).join(" ")}</p>
+    </div>
+    <div class="layer-tag" style="margin:18px 0 8px;letter-spacing:2px;font-family:var(--mono);font-size:11px;color:var(--ink-3)">修复候选（无反对票层）</div>
+    <div class="fix-row">${f}</div>
+    <details><summary>分歧清单（已解决 + 未收敛）</summary><div class="inner"><ul style="padding-left:20px">${div || "<li>无</li>"}</ul></div></details>
+    <details><summary>保留意见（带证据者才收录）</summary><div class="inner"><ol>${res || "<li>无</li>"}</ol></div></details>
+    <details><summary>辩论轨迹</summary><div class="inner"><ol>${traj}</ol></div></details>
+    <details><summary>证据索引</summary><div class="inner"><ul style="padding-left:20px">${ev}</ul></div></details>
+    <details><summary>成本披露</summary><div class="inner"><p style="font-size:13px;font-family:var(--mono);line-height:2">
+      ${esc(D.cost.calls)}<br>${esc(D.cost.tokens)}<br>${esc(D.cost.wall)}<br>${esc(D.cost.compare)}</p></div></details>
+  </div>`;
+}
+
+function renderB() {
+  const div = (D.divergences||[]).map((x,i) => `
+    <li><b>${i+1}. ${esc(x.a)} 认为是 ${esc(x.aView)}；${esc(x.b)} 认为是 ${esc(x.bView)}；分歧在于${esc(x.point)}。</b>
+    经 ${esc(x.round)} 辩论，${esc(x.resolved)}。</li>`).join("");
+  const res = (D.reservations||[]).map(x => `
+    <blockquote><span class="q-who">${esc(x.who)} 原话</span>“${esc(x.quote)}”<br><span style="font-size:12.5px">${esc(x.evidence)}</span></blockquote>`).join("");
+  const traj = (D.trajectory||[]).map(t => `<li><span class="t">${esc(t.round)}</span>${esc(t.key)}（${esc(t.turns)}）</li>`).join("");
+  return `
+  <div class="vb">
+    <h1>${esc(D.question)}</h1>${meta()}
+    <div class="doc">
+      <p class="ruling">合议庭经辩论与表决，就本案根因达成${badge(D.rootCause.status)}，现报告如下：</p>
+      <h2>根因认定</h2>
+      <p>${esc(D.rootCause.text)}</p>
+      <p style="font-size:12.5px;color:var(--ink-3)">表决：${esc(D.rootCause.votes)}。认定依据：${(D.rootCause.evidence||[]).map(e=>`<span class="file">${esc(e)}</span>`).join("、")}。</p>
+      <h2>修复建议</h2>
+      <ol>${(D.fixes||[]).map(f=>`<li><b>${esc(f.title)}</b> ${badge(f.status)}——${esc(f.desc)}${f.note?` <span style="color:var(--bad)">${esc(f.note)}</span>`:""} <span style="font-size:12px;color:var(--ink-3)">（${esc(f.votes)}）</span></li>`).join("")}</ol>
+      <h2>分歧与解决</h2><ol>${div}</ol>
+      <h2>保留意见</h2>${res || "<p>无。</p>"}
+      <h2>辩论经过</h2><ul class="timeline">${traj}</ul>
+      <h2>证据索引</h2><ul>${(D.evidenceIndex||[]).map(e=>`<li><span class="file">${esc(e.loc)}</span>——${esc(e.desc)} ${e.verified?"✓ 已复核":"未复核"}</li>`).join("")}</ul>
+      <h2>成本</h2>
+      <p style="font-family:var(--mono);font-size:12.5px;line-height:2">${esc(D.cost.calls)}；${esc(D.cost.tokens)}；${esc(D.cost.wall)}。${esc(D.cost.compare)}</p>
+    </div>
+  </div>`;
+}
+
+function renderC() {
+  const rows = (D.investigators||[]).map(inv => {
+    const cells = (D.matrix && D.matrix[inv.id]) || {};
+    const cell = (k) => cells[k] ? `<div class="cell-head">${esc(cells[k])}</div>` : '';
+    return `<tr><td class="who">${esc(inv.id)}<br><span class="cell-sub">${esc(inv.host||'')}</span><br><span class="cell-sub">${esc(inv.model||'')}</span></td>
+      <td>${cell('r1') || '—'}</td><td>${cell('r2') || '—'}</td><td>${cell('r3') || '—'}</td><td>${cell('vote') || '—'}</td></tr>`;
+  }).join("");
+  const div = (D.divergences||[]).map(x=>`<tr><td class="who">${esc(x.round)}</td><td><b>${esc(x.a)}</b>: ${esc(x.aView)}</td><td><b>${esc(x.b)}</b>: ${esc(x.bView)}</td><td>${esc(x.point)}</td><td style="font-size:12px">${esc(x.resolved)}</td></tr>`).join("");
+  const res = (D.reservations||[]).map(x=>`<li><b>${esc(x.who)}</b>: “${esc(x.quote)}” <span class="cell-sub">${esc(x.evidence)}</span></li>`).join("");
+  const traj = (D.trajectory||[]).map(t=>`<li><span class="cell-sub">${esc(t.round)} · ${esc(t.turns)}</span> ${esc(t.key)}</li>`).join("");
+  const ev = (D.evidenceIndex||[]).map(e=>`<li><span class="file">${esc(e.loc)}</span> ${esc(e.desc)} ${e.verified?"✓":""}</li>`).join("");
+  return `
+  <div class="vc">
+    <h1>${esc(D.question)}</h1>${meta()}
+    <h3>观点矩阵（调查员 × 轮次 → 表决）</h3>
+    <table><thead><tr><th>调查员</th><th>R1 盲辩</th><th>R2 交叉批评</th><th>R3 收敛</th><th>表决</th></tr></thead><tbody>${rows}</tbody></table>
+    <h3>根因（行共识）</h3>
+    <table><tr><td style="width:110px" class="who">根因共识</td><td>${esc(D.rootCause.text)} <span class="cell-sub">${esc(D.rootCause.votes)}</span></td></tr></table>
+    <h3>修复候选（列对比）</h3>
+    <table><thead><tr><th>候选</th><th>状态</th><th>票</th><th>要点 / 反对理由</th></tr></thead>
+    ${(D.fixes||[]).map(f=>`<tr><td><b>${esc(f.title)}</b></td><td>${badge(f.status)}</td><td class="cell-sub">${esc(f.votes)}</td><td style="font-size:12.5px">${esc(f.desc)}${f.note?`<br><span class="obj">${esc(f.note)}</span>`:""}</td></tr>`).join("")}</table>
+    <h3>分歧记录（归因格式）</h3>
+    <table><thead><tr><th>轮次</th><th>甲方立场</th><th>乙方立场</th><th>分歧点</th><th>结果</th></tr></thead><tbody>${div}</tbody></table>
+    <h3>保留意见（原话）</h3><ul class="dense">${res}</ul>
+    <h3>轨迹</h3><ul class="dense">${traj}</ul>
+    <h3>证据 & 成本</h3>
+    <ul class="dense">${ev}</ul>
+    <p style="font-family:var(--mono);font-size:12px;color:var(--ink-2);line-height:1.9">${esc(D.cost.calls)} · ${esc(D.cost.tokens)} · ${esc(D.cost.wall)}<br>${esc(D.cost.compare)}</p>
+  </div>`;
+}
+
+const VARIANTS = [
+  { key: "A", name: "结论优先卡片式", render: renderA },
+  { key: "B", name: "叙事公文判决书", render: renderB },
+  { key: "C", name: "观点矩阵高密度", render: renderC },
+];
+const app = document.getElementById("app"), swlabel = document.getElementById("swlabel");
+function currentIdx() {
+  const v = new URLSearchParams(location.search).get("variant") || "A";
+  const i = VARIANTS.findIndex(x => x.key === v.toUpperCase());
+  return i >= 0 ? i : 0;
+}
+function show(i) {
+  const v = VARIANTS[i];
+  const url = new URL(location); url.searchParams.set("variant", v.key);
+  history.replaceState(null, "", url);
+  document.title = `共识报告（${v.key}）· ${D.question}`;
+  app.innerHTML = v.render();
+  swlabel.innerHTML = `<b>${v.key}</b>（${v.name}）<small>${i+1}/${VARIANTS.length}</small>`;
+}
+const go = d => show((currentIdx() + d + VARIANTS.length) % VARIANTS.length);
+document.getElementById("prev").onclick = () => go(-1);
+document.getElementById("next").onclick  = () => go(1);
+document.addEventListener("keydown", e => {
+  if (/INPUT|TEXTAREA/.test(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+  if (e.key === "ArrowLeft") go(-1);
+  if (e.key === "ArrowRight") go(1);
+});
+show(currentIdx());
+</script>
+</body>
+</html>
