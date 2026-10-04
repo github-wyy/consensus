@@ -1,7 +1,7 @@
 // checkpoint.mjs 单测：rounds 追加不覆盖、divergences 整体替换、cost 累积与 null 容错
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newRound, appendRound, accumulateCost } from '../lib/checkpoint.mjs';
+import { newRound, appendRound, accumulateCost, roundsAllowed } from '../lib/checkpoint.mjs';
 
 const R = (seat, over = {}) => ({
   seat,
@@ -59,4 +59,14 @@ test('cost 容错：缺省 attempts 计 1', () => {
   const state = {};
   accumulateCost(state, [{ seat: 'dsh', result: { stopReason: 'error', output: '' } }]);
   assert.equal(state.cost.calls, 1);
+});
+
+test('roundsAllowed：quick 模式挡交叉批评轮，表决与追问不受限', () => {
+  assert.equal(roundsAllowed({ mode: 'quick' }, 'R2'), false);
+  assert.equal(roundsAllowed({ mode: 'quick' }, 'R3'), false);
+  assert.equal(roundsAllowed({ mode: 'quick' }, 'vote'), true);
+  assert.equal(roundsAllowed({ mode: 'quick' }, 'Q1'), true);
+  assert.equal(roundsAllowed({ mode: 'full' }, 'R2'), true);
+  assert.equal(roundsAllowed({}, 'R2'), true);
+  assert.equal(roundsAllowed(null, 'R2'), true); // 旧 checkpoint（无 mode 字段）视为 full
 });

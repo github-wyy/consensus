@@ -49,8 +49,8 @@ ACP `session/request_permission` 统一策略：
 
 ### 阶段 0：触发与解析
 
-- 触发词：`/consensus <问题>` 或用户明确表达
-- 解析：问题文本原文（一字不改）、当前工作区（`session/new` 的 cwd / 子进程 cwd）
+- 触发词：`/consensus <问题>` 或用户明确表达；`--quick` / "快速共识" → quick 模式（决策 17）
+- 解析：问题文本原文（一字不改）、当前工作区（`session/new` 的 cwd / 子进程 cwd）、模式（quick|full，入 state.mode）
 - 构造 R1 任务书模板（见 §2）
 
 ### 阶段 1：盲辩（并行）
@@ -65,6 +65,7 @@ ACP `session/request_permission` 统一策略：
 
 - 构建观点矩阵：三席 × {根因判断, 置信度, 证据}
 - 分歧检测：根因文本语义对比（协调者判断）
+- **quick 模式（决策 17）**：无论是否分歧，跳过阶段 3，直接起草→表决（run.mjs 对 R* 轮次硬拒绝；vote 与追问 Q* 不受限）
 - **进入 R2 的条件**（三者其一）：结论存在分歧 / 任一席置信度 <70% / 关键证据缺 file:line
 - 全部不满足 → 直跳表决（阶段 4）
 - 若已达共识且证据齐备：起草文案 → 表决确认（快通道）
@@ -128,11 +129,12 @@ node $LIB/run.mjs blind --workspace <repo> --question-file <q.txt>
 # 阶段2（协调者本地，零调用）：读三份报告 → 观点矩阵 + 分歧检测 → 条件触发判定
 #   全一致且置信度≥70%且证据齐 → 直跳表决；否则进 R2
 
-# 阶段3 亮牌（每席 prompt 文件须含：该席自己上轮报告 + 他方结论 + 分歧点，见 §2 R2+ 模板）
-node $LIB/run.mjs round --run <ts> --prompt-file <r2.txt> --workspace <repo> [--phase R2] [--divergences-file <div.txt>]
+# 阶段3 亮牌（per-seat prompt：--prompt-dir 下每席一个 <seat>.md，按 §2 R2+ 模板含该席自己上轮报告；缺该席文件回落共用 --prompt-file）
+node $LIB/run.mjs round --run <ts> --prompt-dir <dir> --workspace <repo> [--phase R2] [--divergences-file <div.txt>]
 # 协调者同时用 read/grep 亲自实证分歧点；轮末未收敛分歧经 --divergences-file 写入 checkpoint（一行一个，整体替换 openDisagreements）
+# quick 模式下 run.mjs 硬拒绝 R* 轮次（决策 17）——直接走 vote
 
-# 阶段4 表决（draft-file = 共识文案草案，模板见 §2）
+# 阶段4 表决（draft-file = 共识文案草案，模板见 §2；共用草案广播全体）
 node $LIB/run.mjs vote --run <ts> --draft-file <draft.txt> --workspace <repo>
 # → 读 reports/<seat>-vote.md 收集三份表态 → 分层判定
 
@@ -177,6 +179,7 @@ round/vote 重建阵容：bin 取自 checkpoint 快照（失效则重新三级�
 > v1 架构：run.mjs 每次调用独立进程，ACP 会话不跨调用存活。协调者构造 R2+ prompt 时
 > **必须包含该席自己的上一轮结论**（从 `.consensus/runs/<ts>/reports/<seat>-<phase>.md` 读取），
 > 加上他方结论与分歧点——run 契约的降级重放路径，鲁棒且状态简单；服务端会话 resume 留作 v2。
+> 落地：`round --prompt-dir <dir>`（每席 `<seat>.md`，按本模板构造）；缺该席文件时回落单一共用 `--prompt-file` 广播（token 略费，语义等价）。
 
 ```
 【你上一轮的结论】
@@ -210,7 +213,7 @@ round/vote 重建阵容：bin 取自 checkpoint 快照（失效则重新三级�
 
 ```jsonc
 {
-  "question": "...", "date": "ISO", "workspace": "...", "rounds": "N 轮 + 表决",
+  "question": "...", "date": "ISO", "workspace": "...", "mode": "full|quick", "rounds": "N 轮 + 表决",
   "investigators": [{ "id": "glm|deepseek|third", "host": "...", "model": "..." }],
   "rootCause": { "text": "...", "status": "强共识|共识+保留意见|多数共识 2:1|未收敛",
                   "votes": "n同意/n反对/n保留", "evidence": ["file:line", ...] },
@@ -283,3 +286,4 @@ idleRecycleMs: 1800000     # 30 分钟
 估算公式：单次等价诊断 ≈ R1 任务书 tokens（三席共享同一任务书文本）× 1 席。
 报告 `cost.compare` 字段格式：`单 agent 对照基线：1 次调用 / ~XK tokens / ~Y 秒（无分歧报告与交叉验证）`，X/Y 取三席 R1 均值。
 成本数据取自 state.json 的 cost 累积（calls = Σ attempts；tokens 为 usage 汇总，oc-spawn 无 usage 时如实缺失）。
+quick 模式成本约为 full 的 1/3——同一问题可双跑（`--mode quick` 与默认 full）对照成本与结论稳定性，`cost.compare` 字段记录对照。

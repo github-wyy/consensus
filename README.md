@@ -34,6 +34,8 @@ LLM 单模型会过早自信：一旦形成某个框架就难以自我跳出（D
 - **逐轮 checkpoint**：state.json 累积式记录每席每轮 attempts / 失败分类 / 通道回落 / 成本——中断恢复、审计、成本对照的单一数据源
 - **失败三分类诊断**：`launch-failure`（回落通道重试并披露）/ `budget-starved`（放宽预算重试）/ `structural`（不重试缺席）；**重试只做无损动作，收窄审查范围的有损动作须用户批准**
 
+**模式**：默认 full（完整六阶段）；`--mode quick` = R1 盲辩 + 直接表决（跳过阶段 3，run.mjs 对交叉批评轮硬拒绝，约 1/3 成本）——用于成本敏感问题，或与 full 同题对照（见[直面反方证据](#直面反方证据)）。
+
 ## 协议设计依据
 
 每条纪律都有出处——不是拍脑袋：
@@ -54,7 +56,7 @@ LLM 单模型会过早自信：一旦形成某个框架就难以自我跳出（D
 
 [Debate or Vote](https://arxiv.org/abs/2508.17536) 证明辩论轮是鞅，那为什么本协议还保留交叉批评轮？因为它在协议里的角色不是"期望上提升正确率"，而是：**暴露分歧点**（给协调者实证指靶）+ **给认输方一个被证据说服的更新机会**——论文自己证明了后半句：朝纠偏方向偏置信念更新（MAD-Follower 类干预）可以超越 vanilla MAD，而 file:line 证据门槛正是这种偏置的最严格形式。
 
-诚实披露：我们尚未做"R1+表决 vs 完整协议"的对照实验（quick 基线模式在路线图中）。在补上之前，成本敏感的问题可以只看默认路径的成本披露，自行判断增量收益。
+诚实披露：对照实验数据尚待积累——但协议已把"辩论轮的增量收益"变成**可测量的量**：`--mode quick`（R1 盲辩 + 直接表决，约 1/3 成本）就是为这个批评准备的开关。同一问题双跑 quick/full，成本与结论稳定性直接对比，不必信仰任何一方。
 
 ## 与近邻的差异
 
@@ -98,6 +100,7 @@ node lib/run.mjs preflight --workspace <你的项目>
 
 ```
 /consensus <你的问题>
+/consensus --quick <你的问题>    # 快速基线：盲辩+直接表决，约 1/3 成本
 ```
 
 产物落盘：`<项目>/.consensus/runs/<ts>/`——`state.json`（checkpoint）、`reports/`（各席各轮报告）、`report.json` / `report.html`（协调者编译）、`events.ndjson`（审计流）。
@@ -131,14 +134,14 @@ node --test 'test/*.test.mjs'
 ## 限制（诚实披露）
 
 - 三个宿主（opencode / dsh / omp）需本地安装；缺席席位如实降级（双共识过渡），不假装等价
-- 成本约 3-12 倍单次调用；Debate-or-Vote 的学术批评尚未用对照实验回应（quick 基线模式在路线图）
-- token 计量 best-effort：ACP 席有 usage_update，部分 CLI 通道有事件；oc-spawn 通道无 usage 时如实缺失
+- 成本约 3-12 倍单次调用（quick 模式约 1/3）；鞅批评的 quick/full 对照数据尚待积累
+- token 计量 best-effort：ACP 席仅在上报过 usage_update 时计入（否则如实缺失）；部分 CLI 通道从事件流解析；oc-spawn 通道无 usage
 - 协议文档（SKILL_BODY.md）为中文
 - 测试覆盖 diagnose / preflight / checkpoint 纯函数（27 例）；真实三席链路靠 `preflight` + `blind` 冒烟验证
 
 ## 路线图
 
-- quick 基线模式（R1 + 直接表决，用于成本对照与鞅批评的实证回应）
+- quick/full 同题对照的实测数据积累（回应 Debate-or-Vote 鞅批评的实证面）
 - mABC 式席位权重（分级追问时按历史命中率加权）
 - v2 长驻 ACP 会话（省上下文重放 token）
 

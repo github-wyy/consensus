@@ -203,3 +203,12 @@ consensus/
 ## 9. 开放问题
 
 无——设计已与用户逐节确认（方案 2 深融合；仓库即 github-wyy/consensus；README 中文为主）。
+
+## 10. 变更记录
+
+- **2026-10-04（用户指示"继续"，补做出栈项与验证缺口）**：
+  - quick 基线模式（决策 17）：`blind --mode quick` → state.mode，run.mjs 对 R* 交叉批评轮硬拒绝（vote/追问 Q* 不受限），协议文档与 README 同步——原 §2 出栈项提前落地
+  - `round --prompt-dir`：per-seat 亮牌（每席 `<seat>.md`，对齐 §2 R2+ 模板的 own-report 重放；缺文件回落共用 prompt 广播）——修复 v1 文档承诺 per-seat 而代码只广播的缺口
+  - cost 诚实性：ACP 席仅在上报过 usage_update 时透传 usage，否则 null（修复"0 假装有数据"）
+  - 全链路冒烟补齐：round（R2 真实辩论，dsh 撤回含糊表述）→ vote（三席全票同意）→ report.json 编译 → render-report
+
