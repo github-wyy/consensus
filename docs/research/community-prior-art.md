@@ -24,7 +24,7 @@
 | F6 | 只读代码库实证 | 调查员只读权限策略：拒写文件、bash 只读白名单 |
 | F7 | 成本披露 | 调用数/token/耗时 + 单 agent 基线对照 |
 | F8 | 可直接装入 OpenCode | 以 skill 形式运行于 opencode 主会话（中立主持人只调度/汇总/实证） |
-| F9 | 双面报告落盘 | 会话 markdown + HTML 三视图（结论卡/判决书/观点矩阵）+ report.json + events.ndjson 审计流 |
+| F9 | 双面报告落盘 | 会话 markdown + HTML 短幻灯片 deck（封面/结论与证据/辩论过程/分歧与保留/修复/成本，空页自动跳过）+ report.json + events.ndjson 审计流 |
 | F10 | 其他纪律 | 六字段结构化报告（假设集/根因/证据/置信度%/修复草案/开放疑虑）；保留意见逐字引用；分级追问（新信息才触发定向增量辩论） |
 
 ---
@@ -251,7 +251,7 @@
 2. **分层表决规则**（根因=全员非反对；修复=无反对+多候选并列）：Voting or Consensus 是按**任务类型**选协议，mABC/ReConcile 是单一门槛；按**结论类型**在同一会话内分层未见。
 3. **中立协调者亲自实证**：cross-review 的证据研究由参战模型执行、revmux 的 verify 是独立第三阶段；"主持人自己 read/grep 裁决分歧点"这一角色分工（结合 Debate-or-Vote 的鞅洞察）是罕见且理论动机充分的组合。
 4. **成本披露含单 agent 基线对照**：ACPX compare 记录 wall_ms/token 但不做"本会话 vs 单 agent"的对照叙事；Council Mode 只给 4.2× 总开销。
-5. **双面报告+审计流**（HTML 三视图 + report.json + events.ndjson）：revmux/agent-arena 有归档与 checkpoint，但无面向用户的"结论卡/判决书/观点矩阵"三视图产物。
+5. **双面报告+审计流**（HTML 短幻灯片 deck + report.json + events.ndjson）：revmux/agent-arena 有归档与 checkpoint，但无面向用户的"每页一个关键点"deck 产物（封面/根因/三席泳道轨迹/证据/分歧/修复/保留/成本）。
 6. **僵局降级输出分歧报告交用户裁决**：agent-arena"不强制共识+保留异议"最接近，但未作为显式的僵局终态协议（Voting or Consensus 里 approval voting 59% 无结论是被当作失败报告的）。
 
 ### 7.3 继续造 vs 采纳 vs 混合

@@ -63,7 +63,7 @@ ACP `session/request_permission` 统一策略：
 
 ### 阶段 2：汇总与条件触发判定（协调者本地，零调用）
 
-- 构建观点矩阵：三席 × {根因判断, 置信度, 证据}
+- 构建观点矩阵：三席 × {根因判断, 置信度, 证据}（阶段 5 编译进 report.json 的 `matrix` 字段——Review 面 deck 泳道图的数据源，缺失时降级为时间线）
 - 分歧检测：根因文本语义对比（协调者判断）
 - **quick 模式（决策 17）**：无论是否分歧，跳过阶段 3，直接起草→表决（run.mjs 对 R* 轮次硬拒绝；vote 与追问 Q* 不受限）
 - **进入 R2 的条件**（三者其一）：结论存在分歧 / 任一席置信度 <70% / 关键证据缺 file:line
@@ -83,7 +83,7 @@ ACP `session/request_permission` 统一策略：
 
 ### 阶段 4：表决
 
-- 协调者起草共识文案：根因表述 + 修复候选列表 + 分歧清单（归因格式）+ 保留意见（**逐字引用调查员原话**，无转述改写权）
+- 协调者起草共识文案：根因表述（**结构化**：`text`=一句总判断，`breakdown`=分层细目——缺口分层/前置阻塞/时间线各占一条 `{label, text}`，禁止揉成一坨长文本）+ 修复候选列表 + 分歧清单（归因格式）+ 保留意见（**逐字引用调查员原话**，无转述改写权）
 - 每席发极短表决 prompt：`同意 / 反对 / 保留`（+ 证据门槛：反对须带反驳证据并指认分歧点，否则降级保留；保留须引用具体证据或反例，否则丢弃）
 - **分层判定**：
   - 根因：全员非反对（同意+保留）才通过
@@ -94,7 +94,7 @@ ACP `session/request_permission` 统一策略：
 
 - 双面报告（决策 21）：
   - **会话面**（精简 markdown）：根因结论卡+状态徽章 → 修复候选并列 → 分歧归因清单 → 保留意见原话 → 成本披露
-  - **Review 面**：`lib/render-report.mjs` 生成完整 HTML（三视图：A 结论卡片 / B 判决书叙事 / C 观点矩阵，原型 `docs/tmp/consensus-report-prototype.html` 转正）写入 `.consensus/runs/<ts>/report.html`，Review pane 打开
+  - **Review 面**：`lib/render-report.mjs` 生成短幻灯片 deck HTML（show-me 风格：按叙事顺序每页一个单元——封面/结论与证据/辩论过程/分歧与保留/修复候选/成本，空内容页自动跳过；每页页眉含章节名+问题标题；过程页三席泳道图与辩论经过时间线并列（`matrix` 缺失仅时间线）；←/→ 翻页、`?slide=N` 深链接）写入 `.consensus/runs/<ts>/report.html`，Review pane 打开
 - 落盘结构：
 
 ```
@@ -102,7 +102,7 @@ ACP `session/request_permission` 统一策略：
 ├── state.json      # checkpoint：rounds[] 累积（每席 attempts/diagnosis/channelFallback）、openDisagreements、cost 累积、阵容快照（不含凭据）
 ├── reports/        # <seat>-<phase>.md 各席各轮报告（含失败诊断与重试轨迹）
 ├── report.json     # 结构化共识记录（schema = 原型 mock 数据结构 D；协调者编译）
-├── report.html     # Review 面三视图渲染
+├── report.html     # Review 面短幻灯片 deck 渲染
 └── events.ndjson   # 全部调查员调用原始事件流（审计）
 ```
 
@@ -138,7 +138,7 @@ node $LIB/run.mjs round --run <ts> --prompt-dir <dir> --workspace <repo> [--phas
 node $LIB/run.mjs vote --run <ts> --draft-file <draft.txt> --workspace <repo>
 # → 读 reports/<seat>-vote.md 收集三份表态 → 分层判定
 
-# 阶段5 编译 report.json（schema §3）→ 渲染 → Review pane 打开
+# 阶段5 编译 report.json（schema §3；须含 matrix 观点矩阵=deck 泳道图数据源）→ 渲染 → Review pane 打开
 node $LIB/render-report.mjs <repo>/.consensus/runs/<ts>/report.json
 # → report.html 同目录生成；协调者用 browser preview 打开给用户
 
@@ -215,7 +215,12 @@ round/vote 重建阵容：bin 取自 checkpoint 快照（失效则重新三级�
 {
   "question": "...", "date": "ISO", "workspace": "...", "mode": "full|quick", "rounds": "N 轮 + 表决",
   "investigators": [{ "id": "glm|deepseek|third", "host": "...", "model": "..." }],
-  "rootCause": { "text": "...", "status": "强共识|共识+保留意见|多数共识 2:1|未收敛",
+  "matrix": { "<seat>": { "r1": "...", "r2": "...", "r3": "...", "vote": "同意|反对|保留" } },
+             // 可选：观点矩阵（席位×轮次），deck 轨迹页泳道图数据源；缺失时降级为 trajectory 时间线
+  "rootCause": { "text": "一句总判断", "status": "强共识|共识+保留意见|多数共识 2:1|未收敛",
+                  "breakdown": [{ "label": "(a) 缺口层标识", "text": "该层细目与证据" }],
+                  // 可选但强烈建议：分层细目（缺口分层/前置阻塞/时间线各占一层），deck 结论页结构化渲染的数据源；
+                  // 缺失时长文本按句兜底拆行（首句为总判断），观感打折
                   "votes": "n同意/n反对/n保留", "evidence": ["file:line", ...] },
   "fixes": [{ "title": "...", "desc": "...", "status": "...", "votes": "...", "note": "反对理由" }],
   "divergences": [{ "a": "...", "aView": "...", "b": "...", "bView": "...",
